@@ -5,11 +5,13 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"runtime"
 	"sort"
 	"sync"
 	"time"
 
 	"github.com/BeaconCat/PharosPortal/internal/tungw"
+	"github.com/BeaconCat/PharosPortal/internal/wincap"
 )
 
 // Config 一次运行的配置。
@@ -61,6 +63,7 @@ type Manager struct {
 	mask     net.IP
 	mode     string // "dhcp" | "tun"
 	gw       *tungw.Gateway
+	wgw      *wincap.Gateway // Windows 设备级抓包网关 (非整机模式)
 	allow    map[string]bool // 规范化 MAC 白名单
 	logs     []string
 
@@ -135,17 +138,33 @@ func (m *Manager) Start(cfg Config) error {
 				return fmt.Errorf("set interface IP failed: %v", err)
 			}
 		}
-		gw := tungw.New()
-		if err := gw.Start(tungw.Options{
-			TunName: "pptun0", TunAddr: "198.18.0.1", TunCIDR: 15,
-			DevSubnet: subnetCIDR(serverIP, ones), Uplink: cfg.Uplink, Proxy: cfg.Proxy,
-			WholeSystem: cfg.WholeSystem, Log: m.logf,
-		}); err != nil {
-			m.logf("[!] TUN gateway failed (device will get IP but no internet): %v", err)
+		// Windows 非整机模式: 用 WinDivert 转发层只抓下游设备流量 (主机不受影响),
+		// 相当于 Linux 策略路由。其它情况 (Linux, 或 Windows 整机模式) 走 tungw。
+		if runtime.GOOS == "windows" && !cfg.WholeSystem && wincap.Supported() {
+			wg := wincap.New()
+			if err := wg.Start(wincap.Options{
+				DevSubnet: subnetCIDR(serverIP, ones), DevIfIndex: uint32(iface.Index),
+				Uplink: cfg.Uplink, Proxy: cfg.Proxy, Log: m.logf,
+			}); err != nil {
+				m.logf("[!] device-only capture failed (device gets IP but no internet): %v", err)
+			} else {
+				m.mu.Lock()
+				m.wgw, m.mode = wg, "tun"
+				m.mu.Unlock()
+			}
 		} else {
-			m.mu.Lock()
-			m.gw, m.mode = gw, "tun"
-			m.mu.Unlock()
+			gw := tungw.New()
+			if err := gw.Start(tungw.Options{
+				TunName: "pptun0", TunAddr: "198.18.0.1", TunCIDR: 15,
+				DevSubnet: subnetCIDR(serverIP, ones), Uplink: cfg.Uplink, Proxy: cfg.Proxy,
+				WholeSystem: cfg.WholeSystem, Log: m.logf,
+			}); err != nil {
+				m.logf("[!] TUN gateway failed (device will get IP but no internet): %v", err)
+			} else {
+				m.mu.Lock()
+				m.gw, m.mode = gw, "tun"
+				m.mu.Unlock()
+			}
 		}
 		ctx, cancel := context.WithCancel(context.Background())
 		m.mu.Lock()
@@ -194,7 +213,7 @@ func (m *Manager) Stop() {
 		m.mu.Unlock()
 		return
 	}
-	cancel, cfg, gw := m.cancel, m.cfg, m.gw
+	cancel, cfg, gw, wgw := m.cancel, m.cfg, m.gw, m.wgw
 	m.mu.Unlock()
 	m.logf("stopping, cleaning up ...")
 	if cancel != nil {
@@ -204,6 +223,12 @@ func (m *Manager) Stop() {
 		_ = gw.Stop()
 		m.mu.Lock()
 		m.gw = nil
+		m.mu.Unlock()
+	}
+	if wgw != nil {
+		_ = wgw.Stop()
+		m.mu.Lock()
+		m.wgw = nil
 		m.mu.Unlock()
 	}
 	if cfg.SetIP {
