@@ -90,11 +90,11 @@ func (m *Manager) handle(req *dhcpReq) []byte {
 	mac := req.chaddr.String()
 	// MAC 白名单: 非空时, 只服务名单内设备 (同段其它设备一律不理)。
 	m.mu.Lock()
-	if len(m.allow) > 0 && !m.allow[normalizeMAC(mac)] {
-		m.mu.Unlock()
+	blocked := len(m.allow) > 0 && !m.allow[normalizeMAC(mac)]
+	m.mu.Unlock()
+	if blocked {
 		return nil
 	}
-	m.mu.Unlock()
 
 	yi := m.alloc(mac)
 	if yi == nil {
@@ -104,16 +104,20 @@ func (m *Manager) handle(req *dhcpReq) []byte {
 	var respType byte = 2 // OFFER
 	if req.mtype == 3 {
 		respType = 5 // ACK
+		// 计算是否需要打日志 (锁内), 但日志本身放到锁外 —— m.logf 会再取 m.mu, 锁内调用会死锁。
 		m.mu.Lock()
+		doLog := false
 		if l := m.leases[mac]; l != nil {
-			// 只在首次 ACK 或 IP 变化时打日志, 避免续租刷屏
-			if !l.logged || l.IP != yi.String() {
-				m.logf(">> device  MAC=%s  IP=%s", mac, yi)
+			if !l.logged || l.IP != yi.String() { // 首次 ACK 或 IP 变化才打, 避免续租刷屏
 				l.logged = true
+				doLog = true
 			}
 			l.Ack = true
 		}
 		m.mu.Unlock()
+		if doLog {
+			m.logf(">> device  MAC=%s  IP=%s", mac, yi)
+		}
 	}
 	return m.buildReply(req, respType, yi)
 }

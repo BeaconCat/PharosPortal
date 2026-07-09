@@ -108,10 +108,11 @@ func (m *Manager) Start(cfg Config) error {
 		}
 	}
 	m.mode = "dhcp"
-	if len(m.allow) > 0 {
-		m.logf("MAC allowlist active: %d device(s)", len(m.allow))
-	}
+	nAllow := len(m.allow)
 	m.mu.Unlock()
+	if nAllow > 0 {
+		m.logf("MAC allowlist active: %d device(s)", nAllow)
+	}
 
 	// TUN 网关模式: 保留内建 DHCP (设备拿 192.168.88.x), 另起 TUN 用户态 NAT 让设备上网。
 	// 跨平台可靠, 绕开 WinNAT/ICS; Proxy 非空则下游走主机代理。

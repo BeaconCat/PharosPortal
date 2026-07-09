@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/BeaconCat/PharosPortal/internal/portal"
@@ -32,6 +33,7 @@ func main() {
 		fNoIP   = flag.Bool("no-setip", false, "do not auto-configure NIC IP")
 		fTUN    = flag.Bool("tun", true, "TUN gateway: give the device internet (userspace NAT). -tun=false for DHCP-only")
 		fProxy  = flag.String("proxy", "", "TUN downstream proxy, e.g. socks5://127.0.0.1:1080 (empty=direct via host)")
+		fAllow  = flag.String("allow", "", "MAC allowlist (comma-separated); only serve these devices")
 		fPort   = flag.Int("gui-port", 8765, "GUI local port")
 	)
 	flag.Parse()
@@ -54,6 +56,7 @@ func main() {
 		Iface: *fIface, Uplink: *fUplink, ServerIP: *fServer, Mask: *fMask,
 		RangeStart: *fStart, RangeEnd: *fEnd, DNS: *fDNS, LeaseMin: *fLease,
 		SetIP: !*fNoIP, TUN: *fTUN, Proxy: *fProxy,
+		Allow: splitCSV(*fAllow),
 	}
 	if err := mgr.Start(cfg); err != nil {
 		fmt.Println("[x] start failed:", err)
@@ -63,4 +66,14 @@ func main() {
 	defer stop()
 	<-ctx.Done()
 	mgr.Stop()
+}
+
+func splitCSV(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
