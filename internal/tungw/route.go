@@ -35,14 +35,22 @@ func (g *Gateway) routeLinux(add bool) error {
 	return nil
 }
 
-// Windows: 整机 TUN (默认路由走 tun, 引擎出站已绑定上行网卡防环回), 类似 Clash TUN 模式。
-// 主机流量在 direct 下透明通过; 下游设备经主机转发命中默认路由进 tun 被 NAT。
+// Windows: 无源路由能力 (route/netsh 只按目的地), 无法像 Linux 那样只导下游网段。
+// 默认【不动】主机路由 —— 只准备好 tun (地址+转发), 避免接管主机自身流量。
+// 仅当 WholeSystem=true 时才把整机默认路由改走 tun (整机代理模式, 会接管主机流量)。
 func (g *Gateway) routeWindows(add bool) error {
-	tun, addr, sub := g.opts.TunName, g.opts.TunAddr, g.opts.DevSubnet
+	tun, addr := g.opts.TunName, g.opts.TunAddr
 	if add {
 		_ = execRun("netsh", "interface", "ip", "set", "address", "name="+tun, "static", addr, "255.192.0.0")
 		_ = execRun("netsh", "interface", "ipv4", "set", "interface", tun, "forwarding=enabled")
-		_ = execRun("netsh", "interface", "ipv4", "set", "interface", sub, "forwarding=enabled") // best-effort
+		_ = execRun("netsh", "interface", "ipv4", "set", "interface", g.opts.DevSubnet, "forwarding=enabled") // best-effort
+		if !g.opts.WholeSystem {
+			g.opts.Log("[!] Windows: whole-system route OFF -> host traffic untouched, but the downstream")
+			g.opts.Log("    device has NO internet (Windows routing cannot split by source). Enable")
+			g.opts.Log("    whole-system mode to route the whole host (incl. its own traffic) via the tun.")
+			return nil
+		}
+		g.opts.Log("[!] Windows whole-system mode: ALL host traffic now routes through the tun.")
 		_ = execRun("route", "delete", "0.0.0.0", "mask", "0.0.0.0", addr)
 		return execRun("route", "add", "0.0.0.0", "mask", "0.0.0.0", addr, "metric", "1")
 	}

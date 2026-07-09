@@ -16,7 +16,11 @@ type Options struct {
 	DevSubnet string // 下游设备网段 CIDR, e.g. "192.168.88.0/24"
 	Uplink    string // 上行网卡名 (出站绑定, 防环回)
 	Proxy     string // "" = direct; 或 socks5://host:port , http://host:port
-	Log       func(string, ...any)
+	// WholeSystem 仅 Windows 有意义: Windows 路由表无源路由, 无法只导下游网段。
+	// true 时把整机默认路由改走 tun (整机代理, 会接管主机自身流量); false 时不动主机路由
+	// (下游设备在 Windows 上暂无法上网, 需整机模式或改用 Linux 策略路由)。Linux 始终按网段分流。
+	WholeSystem bool
+	Log         func(string, ...any)
 }
 
 type Gateway struct {

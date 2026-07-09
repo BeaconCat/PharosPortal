@@ -33,6 +33,7 @@ func main() {
 		fNoIP   = flag.Bool("no-setip", false, "do not auto-configure NIC IP")
 		fTUN    = flag.Bool("tun", true, "TUN gateway: give the device internet (userspace NAT). -tun=false for DHCP-only")
 		fProxy  = flag.String("proxy", "", "TUN downstream proxy, e.g. socks5://127.0.0.1:1080 (empty=direct via host)")
+		fWhole  = flag.Bool("whole-system", false, "Windows only: route the WHOLE host through the tun (takes over host traffic). Off = host untouched")
 		fAllow  = flag.String("allow", "", "MAC allowlist (comma-separated); only serve these devices")
 		fPort   = flag.Int("gui-port", 8765, "GUI local port")
 	)
@@ -55,7 +56,7 @@ func main() {
 	cfg := portal.Config{
 		Iface: *fIface, Uplink: *fUplink, ServerIP: *fServer, Mask: *fMask,
 		RangeStart: *fStart, RangeEnd: *fEnd, DNS: *fDNS, LeaseMin: *fLease,
-		SetIP: !*fNoIP, TUN: *fTUN, Proxy: *fProxy,
+		SetIP: !*fNoIP, TUN: *fTUN, Proxy: *fProxy, WholeSystem: *fWhole,
 		Allow: splitCSV(*fAllow),
 	}
 	if err := mgr.Start(cfg); err != nil {

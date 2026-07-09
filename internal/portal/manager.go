@@ -26,6 +26,9 @@ type Config struct {
 	TUN        bool     `json:"tun"`   // TUN 网关: 给设备上网 (用户态 NAT)
 	Proxy      string   `json:"proxy"` // TUN 出站: 空=direct(经主机); 或 socks5://host:port / http://host:port
 	Allow      []string `json:"allow"` // MAC 白名单 (非空则只服务名单内设备)
+	// WholeSystem 仅 Windows: 整机默认路由改走 tun (会接管主机自身流量)。默认 false, 不劫持主机。
+	// Linux 始终用策略路由只导下游网段, 此项无效。
+	WholeSystem bool `json:"wholeSystem"`
 }
 
 // DefaultConfig 返回默认参数。
@@ -136,7 +139,7 @@ func (m *Manager) Start(cfg Config) error {
 		if err := gw.Start(tungw.Options{
 			TunName: "pptun0", TunAddr: "198.18.0.1", TunCIDR: 15,
 			DevSubnet: subnetCIDR(serverIP, ones), Uplink: cfg.Uplink, Proxy: cfg.Proxy,
-			Log: m.logf,
+			WholeSystem: cfg.WholeSystem, Log: m.logf,
 		}); err != nil {
 			m.logf("[!] TUN gateway failed (device will get IP but no internet): %v", err)
 		} else {

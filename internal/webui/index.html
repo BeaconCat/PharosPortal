@@ -82,6 +82,7 @@
         <div><label data-i18n="lease"></label><input id="leaseMin" type="number"></div>
       </div>
       <label class="chk"><input type="checkbox" id="tun"> <span data-i18n="tunOpt"></span></label>
+      <label class="chk"><input type="checkbox" id="wholeSystem"> <span data-i18n="wholeOpt"></span></label>
       <label class="chk"><input type="checkbox" id="setIP"> <span data-i18n="setIPOpt"></span></label>
       <label style="margin-top:10px" data-i18n="proxyLabel"></label>
       <div style="display:flex;gap:8px;align-items:center">
@@ -123,7 +124,7 @@ const I18N = {
     advanced:"Advanced (defaults are fine)",
     gateway:"Gateway IP", mask:"Subnet mask", rangeStart:"Pool start", rangeEnd:"Pool end", lease:"Lease (min)",
     natOpt:"Enable NAT (let device reach internet)", setIPOpt:"Auto-configure NIC IP",
-    tunOpt:"TUN gateway (userspace NAT, bypass WinNAT/ICS)", proxyLabel:"Downstream proxy for TUN (optional, e.g. socks5://ip:port)",
+    tunOpt:"TUN gateway (userspace NAT, bypass WinNAT/ICS)", wholeOpt:"Windows: route WHOLE host through tun (takes over host traffic; required for device internet on Windows)", proxyLabel:"Downstream proxy for TUN (optional, e.g. socks5://ip:port)",
     testBtn:"Test", allowLabel:"MAC allowlist (optional, only serve these; comma/space separated)",
     testing:"testing...", proxyOkMsg:"OK", proxyFailMsg:"failed", total:"total",
     start:"Start", stop:"Stop",
@@ -140,7 +141,7 @@ const I18N = {
     advanced:"高级参数 (默认即可)",
     gateway:"网关 IP", mask:"子网掩码", rangeStart:"地址池起", rangeEnd:"地址池止", lease:"租约(分钟)",
     natOpt:"启用 NAT (让设备能上网)", setIPOpt:"自动配置网卡 IP",
-    tunOpt:"TUN 网关 (用户态 NAT, 绕开 WinNAT/ICS)", proxyLabel:"TUN 下游代理 (可选, 如 socks5://ip:port)",
+    tunOpt:"TUN 网关 (用户态 NAT, 绕开 WinNAT/ICS)", wholeOpt:"Windows: 整机走 tun (会接管主机自身流量; Windows 上下游设备上网必须开)", proxyLabel:"TUN 下游代理 (可选, 如 socks5://ip:port)",
     testBtn:"测试", allowLabel:"MAC 白名单 (可选, 只服务这些设备; 逗号/空格分隔)",
     testing:"测试中...", proxyOkMsg:"通", proxyFailMsg:"失败", total:"合计",
     start:"启动", stop:"停止",
@@ -165,7 +166,7 @@ function applyLang(){
 }
 $('langBtn').onclick = ()=>{ lang = lang==='en'?'zh':'en'; LS.set('lang',lang); applyLang(); };
 
-const CFG_FIELDS = ['iface','uplink','serverIP','mask','dns','rangeStart','rangeEnd','leaseMin','tun','setIP','proxy','allow'];
+const CFG_FIELDS = ['iface','uplink','serverIP','mask','dns','rangeStart','rangeEnd','leaseMin','tun','wholeSystem','setIP','proxy','allow'];
 const fmtBytes = n => { n=n||0; const u=['B','K','M','G','T']; let i=0; while(n>=1024&&i<4){n/=1024;i++} return n.toFixed(i?1:0)+u[i]; };
 function readForm(){
   const c={}; CFG_FIELDS.forEach(id=>{const e=$(id); c[id]= e.type==='checkbox'?e.checked : e.value;}); return c;
@@ -183,7 +184,7 @@ async function loadIfaces(){
   // defaults then restore saved
   $('serverIP').value=d.serverIP; $('mask').value=d.mask; $('dns').value=d.dns;
   $('rangeStart').value=d.rangeStart; $('rangeEnd').value=d.rangeEnd; $('leaseMin').value=d.leaseMin;
-  $('setIP').checked=!!d.setIP; $('tun').checked=!!d.tun; $('proxy').value=d.proxy||''; $('allow').value='';
+  $('setIP').checked=!!d.setIP; $('tun').checked=!!d.tun; $('wholeSystem').checked=!!d.wholeSystem; $('proxy').value=d.proxy||''; $('allow').value='';
   if(saved){ CFG_FIELDS.forEach(id=>{ if(saved[id]!==undefined){ const e=$(id);
      if(e.type==='checkbox') e.checked=!!saved[id]; else e.value=saved[id]; }}); }
   else { const up = ifaces.find(i=>i.up && i.addrs && i.addrs.some(a=>!a.startsWith('fe80')&&!a.startsWith('169.254'))); if(up) $('uplink').value=up.name; }
@@ -200,7 +201,7 @@ $('go').onclick = async ()=>{
   const f = readForm();
   const cfg = { iface:f.iface, uplink:f.uplink, serverIP:f.serverIP, mask:f.mask, dns:f.dns,
     rangeStart:f.rangeStart, rangeEnd:f.rangeEnd, leaseMin:parseInt(f.leaseMin||'720'),
-    setIP:!!f.setIP, tun:!!f.tun, proxy:f.proxy,
+    setIP:!!f.setIP, tun:!!f.tun, wholeSystem:!!f.wholeSystem, proxy:f.proxy,
     allow:(f.allow||'').split(/[\s,]+/).filter(Boolean) };
   const r = await (await fetch('/api/start',{method:'POST',body:JSON.stringify(cfg)})).json();
   if(!r.ok) alert(t('startFail')+(r.err||'?'));
