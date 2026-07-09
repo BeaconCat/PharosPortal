@@ -33,12 +33,17 @@ type Config struct {
 	WholeSystem bool `json:"wholeSystem"`
 }
 
-// DefaultConfig 返回默认参数。
+// DefaultConfig 返回默认参数。DNS 默认继承主机自身的解析器 (探测失败回退
+// 223.5.5.5), 这样在封锁公共 DNS 的网络 (校园网/企业网) 下下游设备也能解析。
 func DefaultConfig() Config {
+	dns := hostDNS()
+	if dns == "" {
+		dns = "223.5.5.5"
+	}
 	return Config{
 		ServerIP: "192.168.88.1", Mask: "255.255.255.0",
 		RangeStart: "192.168.88.50", RangeEnd: "192.168.88.150",
-		DNS: "223.5.5.5", LeaseMin: 720, SetIP: true, TUN: true,
+		DNS: dns, LeaseMin: 720, SetIP: true, TUN: true,
 	}
 }
 
