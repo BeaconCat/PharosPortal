@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"runtime"
 	"sort"
 	"sync"
 	"time"
@@ -23,10 +22,9 @@ type Config struct {
 	RangeEnd   string `json:"rangeEnd"`
 	DNS        string `json:"dns"`
 	LeaseMin   int    `json:"leaseMin"`
-	NAT        bool   `json:"nat"`
 	SetIP      bool   `json:"setIP"`
-	TUN        bool   `json:"tun"`   // TUN 网关模式 (用户态 NAT, 绕开 WinNAT/ICS)
-	Proxy      string `json:"proxy"` // TUN 出站: 空=direct; 或 socks5://host:port / http://host:port
+	TUN        bool   `json:"tun"`   // TUN 网关: 给设备上网 (用户态 NAT)
+	Proxy      string `json:"proxy"` // TUN 出站: 空=direct(经主机); 或 socks5://host:port / http://host:port
 }
 
 // DefaultConfig 返回默认参数。
@@ -34,7 +32,7 @@ func DefaultConfig() Config {
 	return Config{
 		ServerIP: "192.168.88.1", Mask: "255.255.255.0",
 		RangeStart: "192.168.88.50", RangeEnd: "192.168.88.150",
-		DNS: "223.5.5.5", LeaseMin: 720, NAT: true, SetIP: true,
+		DNS: "223.5.5.5", LeaseMin: 720, SetIP: true, TUN: true,
 	}
 }
 
@@ -56,8 +54,7 @@ type Manager struct {
 	lo, hi   uint32
 	serverIP net.IP
 	mask     net.IP
-	natOn    bool
-	mode     string // "dhcp" | "ics" | "tun"
+	mode     string // "dhcp" | "tun"
 	gw       *tungw.Gateway
 	logs     []string
 }
@@ -101,7 +98,7 @@ func (m *Manager) Start(cfg Config) error {
 	m.mu.Lock()
 	m.cfg, m.serverIP, m.mask, m.lo, m.hi = cfg, serverIP, mask, lo, hi
 	m.leases, m.used = map[string]*leaseInfo{}, map[string]bool{}
-	m.natOn, m.mode = false, "dhcp"
+	m.mode = "dhcp"
 	m.mu.Unlock()
 
 	// TUN 网关模式: 保留内建 DHCP (设备拿 192.168.88.x), 另起 TUN 用户态 NAT 让设备上网。
@@ -141,37 +138,11 @@ func (m *Manager) Start(cfg Config) error {
 		return nil
 	}
 
-	// Windows + NAT: New-NetNat 的 WMI provider 在很多机器上会 0x80041013, 改用系统 ICS。
-	// ICS 自带 DHCP+NAT, 固定 192.168.137.x。
-	if runtime.GOOS == "windows" && cfg.NAT && cfg.Uplink != "" {
-		m.logf("Windows NAT via ICS: sharing %s -> %s (device gets 192.168.137.x + internet)", cfg.Uplink, cfg.Iface)
-		if err := enableICS(cfg.Uplink, cfg.Iface); err != nil {
-			m.logf("[!] ICS failed, falling back to DHCP-only (no NAT, host access still ok): %v", err)
-		} else {
-			ctx, cancel := context.WithCancel(context.Background())
-			m.mu.Lock()
-			m.cancel, m.running, m.mode = cancel, true, "ics"
-			m.mu.Unlock()
-			m.logf("ICS enabled. Discovering device via ARP (192.168.137.x) ...")
-			go m.arpLoop(ctx)
-			return nil
-		}
-	}
-
+	// 仅 DHCP (无 -tun 或未选上行网卡): 设备拿 IP + 本机可访问, 但不上网。
 	if cfg.SetIP {
 		m.logf("setting %s -> %s/%d", cfg.Iface, serverIP, ones)
 		if err := setStaticIP(cfg.Iface, serverIP, mask, ones); err != nil {
 			return fmt.Errorf("set interface IP failed: %v", err)
-		}
-	}
-	if cfg.NAT && cfg.Uplink != "" && runtime.GOOS != "windows" {
-		m.logf("enabling NAT: %s -> %s", subnetCIDR(serverIP, ones), cfg.Uplink)
-		if err := enableNAT(subnetCIDR(serverIP, ones), cfg.Uplink); err != nil {
-			m.logf("[!] NAT failed (host access still ok, device just won't reach internet): %v", err)
-		} else {
-			m.mu.Lock()
-			m.natOn = true
-			m.mu.Unlock()
 		}
 	}
 
@@ -198,7 +169,7 @@ func (m *Manager) Stop() {
 		m.mu.Unlock()
 		return
 	}
-	cancel, cfg, serverIP, mask, natOn, mode, gw := m.cancel, m.cfg, m.serverIP, m.mask, m.natOn, m.mode, m.gw
+	cancel, cfg, gw := m.cancel, m.cfg, m.gw
 	m.mu.Unlock()
 	m.logf("stopping, cleaning up ...")
 	if cancel != nil {
@@ -210,46 +181,12 @@ func (m *Manager) Stop() {
 		m.gw = nil
 		m.mu.Unlock()
 	}
-	if mode == "tun" && cfg.SetIP {
+	if cfg.SetIP {
 		_ = unsetStaticIP(cfg.Iface)
-	}
-	if mode == "ics" {
-		if err := disableICS(cfg.Uplink, cfg.Iface); err != nil {
-			m.logf("[!] disable ICS failed (undo manually in Network Connections): %v", err)
-		}
-	} else {
-		ones, _ := net.IPMask(mask.To4()).Size()
-		if natOn {
-			_ = disableNAT(subnetCIDR(serverIP, ones), cfg.Uplink)
-		}
-		if cfg.SetIP {
-			_ = unsetStaticIP(cfg.Iface)
-		}
 	}
 	m.mu.Lock()
 	m.running = false
 	m.mu.Unlock()
-}
-
-// arpLoop: ICS 模式下轮询系统 ARP 表, 显示 192.168.137.x 的下游设备。
-func (m *Manager) arpLoop(ctx context.Context) {
-	tick := time.NewTicker(3 * time.Second)
-	defer tick.Stop()
-	for {
-		for _, e := range readARP("192.168.137.") {
-			m.mu.Lock()
-			if _, ok := m.leases[e[1]]; !ok {
-				m.logf(">> device  MAC=%s  IP=%s  (ICS)", e[1], e[0])
-			}
-			m.leases[e[1]] = &leaseInfo{MAC: e[1], IP: e[0], Seen: time.Now(), Ack: true}
-			m.mu.Unlock()
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-tick.C:
-		}
-	}
 }
 
 // Status 当前状态快照 (供 UI)。

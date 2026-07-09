@@ -30,6 +30,9 @@ func (g *Gateway) Start(o Options) error {
 	if o.Log == nil {
 		o.Log = func(string, ...any) {}
 	}
+	if err := ensureWintun(); err != nil { // Windows: 释放内嵌 wintun.dll; 其它平台 no-op
+		return fmt.Errorf("prepare wintun.dll: %w", err)
+	}
 	proxy := o.Proxy
 	if proxy == "" {
 		proxy = "direct://"

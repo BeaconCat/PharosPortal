@@ -29,10 +29,9 @@ func main() {
 		fEnd    = flag.String("range-end", "192.168.88.150", "pool end")
 		fDNS    = flag.String("dns", "223.5.5.5", "DNS to hand out")
 		fLease  = flag.Int("lease-min", 720, "lease minutes")
-		fNoNAT  = flag.Bool("no-nat", false, "do not configure NAT")
 		fNoIP   = flag.Bool("no-setip", false, "do not auto-configure NIC IP")
-		fTUN    = flag.Bool("tun", false, "TUN gateway mode (userspace NAT, bypass WinNAT/ICS)")
-		fProxy  = flag.String("proxy", "", "TUN downstream proxy, e.g. socks5://127.0.0.1:1080 (empty=direct)")
+		fTUN    = flag.Bool("tun", true, "TUN gateway: give the device internet (userspace NAT). -tun=false for DHCP-only")
+		fProxy  = flag.String("proxy", "", "TUN downstream proxy, e.g. socks5://127.0.0.1:1080 (empty=direct via host)")
 		fPort   = flag.Int("gui-port", 8765, "GUI local port")
 	)
 	flag.Parse()
@@ -54,7 +53,7 @@ func main() {
 	cfg := portal.Config{
 		Iface: *fIface, Uplink: *fUplink, ServerIP: *fServer, Mask: *fMask,
 		RangeStart: *fStart, RangeEnd: *fEnd, DNS: *fDNS, LeaseMin: *fLease,
-		NAT: !*fNoNAT, SetIP: !*fNoIP, TUN: *fTUN, Proxy: *fProxy,
+		SetIP: !*fNoIP, TUN: *fTUN, Proxy: *fProxy,
 	}
 	if err := mgr.Start(cfg); err != nil {
 		fmt.Println("[x] start failed:", err)

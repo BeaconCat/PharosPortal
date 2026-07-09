@@ -14,7 +14,7 @@ Single binary, no external Go dependencies, clean web GUI, EN/中文.
 ## Features
 - **Owns one physical NIC** and runs a built-in DHCP server **bound to that NIC only** — it will *not* hand out addresses on your corporate/home LAN (no rogue DHCP).
 - **Clean local web GUI**: auto-scans and lists NICs, remembers your settings (localStorage), one-click Start/Stop, live device table + logs. Bilingual (English default, 中文 toggle).
-- **NAT / internet for the device**: Linux `iptables MASQUERADE`; Windows uses **ICS** (Internet Connection Sharing) automatically, because `New-NetNat` (WinNAT) is unreliable on many machines.
+- **Internet for the device via a built-in TUN gateway** (userspace NAT on gVisor netstack, like modern proxy apps) — reliable and identical on Windows/Linux, no WinNAT/ICS. Optionally chain the device's traffic through a **SOCKS5/HTTP proxy** on the host.
 - **CLI mode** for scripting / headless.
 
 ## Build
@@ -50,27 +50,21 @@ The device sits on a private subnet reachable from the host. To reach it from yo
 - Windows: `netsh interface portproxy add v4tov4 listenport=8080 connectaddress=<dev-ip> connectport=80`
 - Linux: `iptables -t nat -A PREROUTING -p tcp --dport 8080 -j DNAT --to <dev-ip>:80`
 
-## Platform notes
-- **Windows NAT = ICS (automatic).** `New-NetNat` often fails with `0x80041013 provider load failure`, so when NAT is enabled PharosPortal uses ICS via the HNetCfg COM API. ICS is system-managed: it sets the device NIC to **192.168.137.1**, runs its own DHCP, and does NAT — so in this mode the device gets **192.168.137.x** (not the built-in DHCP / your 192.168.88.x). PharosPortal discovers the device via ARP and shows it. Uncheck NAT to keep the built-in DHCP (192.168.88.x + lease table) — the device is still reachable from the host, it just won't reach the internet.
-- Firewall may block UDP 67/68 — allow the program.
+## How the TUN gateway works
+The device's internet access is a userspace NAT built on a TUN device + gVisor netstack (via tun2socks) — the same technique modern proxy apps use. The built-in DHCP still hands the device 192.168.88.x (and shows it in the lease table); the TUN gateway forwards its traffic out to the internet, or through a proxy you specify.
+
+Enable it in the GUI (advanced: "TUN gateway", on by default) or CLI:
+```bash
+sudo ./pharosportal -iface eth1 -uplink eth0                                # direct (via host)
+sudo ./pharosportal -iface eth1 -uplink eth0 -proxy socks5://127.0.0.1:1080 # via host proxy
+sudo ./pharosportal -iface eth1 -tun=false                                  # DHCP only (no internet)
+```
+- **Linux**: clean policy routing — only the device subnet goes through the TUN; host traffic untouched.
+- **Windows**: whole-host TUN (default route via the TUN, engine binds outbound to the uplink to avoid loops), like Clash TUN mode. **wintun.dll is embedded** and written next to the exe automatically — no manual step.
+- Firewall may block UDP 67/68 — allow the program. Status: engine + routing validated on Linux; the end-to-end path with real downstream hardware is still being tested.
 
 ## Safety
 The built-in DHCP is restricted to the chosen NIC (Linux `SO_BINDTODEVICE`; Windows `IP_UNICAST_IF` so replies only egress that NIC). It will not disturb DHCP on your other networks.
-
-## TUN gateway mode (experimental)
-A userspace NAT built on a TUN device + gVisor netstack (via tun2socks), like modern proxy apps.
-It keeps the built-in DHCP (device still gets 192.168.88.x + shows in the lease table) and adds
-reliable cross-platform NAT **without** WinNAT/ICS. Bonus: point it at a proxy to route the
-downstream device's traffic through the host's SOCKS5/HTTP proxy or VPN.
-
-Enable it in the GUI (advanced: "TUN gateway") or CLI:
-```bash
-sudo ./pharosportal -iface eth1 -uplink eth0 -tun                       # direct (via host)
-sudo ./pharosportal -iface eth1 -uplink eth0 -tun -proxy socks5://127.0.0.1:1080  # via host proxy
-```
-- Linux: clean policy routing — only the device subnet goes through the TUN; host traffic untouched.
-- Windows: whole-host TUN (default route via the TUN, engine binds outbound to the uplink to avoid loops), like Clash TUN mode; needs **wintun.dll** next to the exe ([download](https://www.wireguard.com/xplatform/#wintun)).
-- Status: the tun2socks forwarding engine is validated; the end-to-end downstream path still needs testing against real hardware. Report issues.
 
 ## Project layout
 ```
@@ -94,7 +88,7 @@ MIT. See [LICENSE](LICENSE).
 ## 特性
 - **接管一块物理网卡**，内建 DHCP **只绑定该网卡**——绝不会在公司/家庭 LAN 上乱发地址。
 - **简洁本地 Web 界面**：自动扫描列出网卡、记住你的设置（localStorage）、一键启停、实时设备表 + 日志。中英双语（默认英语，可切中文）。
-- **给设备做 NAT 上网**：Linux 用 `iptables MASQUERADE`；Windows 自动改用 **ICS**（因为 `New-NetNat`/WinNAT 在很多机器上不可靠）。
+- **内建 TUN 网关给设备上网**（gVisor 用户态 NAT，像现代代理软件）——Windows/Linux 一致、可靠，不依赖 WinNAT/ICS。可选把设备流量**串到主机的 SOCKS5/HTTP 代理**。
 - **CLI 模式**便于脚本/无头使用。
 
 ## 构建
@@ -109,21 +103,18 @@ go build -o pharosportal ./cmd/pharosportal
 - **GUI（默认）**：不带 `-iface` 直接运行，自动开浏览器。选“面向设备的网卡”+“上行网卡”，默认参数，点“启动”。设备上电后表格实时显示其 MAC/IP。
 - **CLI**：`sudo ./pharosportal -iface eth1 -uplink eth0`
 
-## 平台说明
-- **Windows NAT = ICS（自动）**：`New-NetNat` 常报 `0x80041013 提供程序加载失败`，故启用 NAT 时改用系统 ICS（HNetCfg COM）。ICS 由系统托管：把设备网卡设为 **192.168.137.1**、自带 DHCP、做 NAT——此模式下设备拿到 **192.168.137.x**（不是内建 DHCP 的 192.168.88.x），工具经 ARP 发现并显示。想用内建 DHCP（88.x + 租约表）就**不勾 NAT**（设备仍可被本机访问，只是它自己不上网）。
-- 防火墙可能拦 UDP 67/68，放行本程序。
+## TUN 网关怎么工作
+设备上网靠内建 TUN 网关（TUN + gVisor 用户态协议栈 / tun2socks），和现代代理软件同一套。内建 DHCP 照样给设备派 192.168.88.x（进租约表）；TUN 网关把它的流量转发到外网，或走你指定的代理。
 
-## TUN 网关模式（实验）
-基于 TUN + gVisor 用户态协议栈（tun2socks），像现代代理软件那样做 NAT。**保留内建 DHCP**（设备照拿 192.168.88.x、进租约表），并提供跨平台可靠 NAT，**摆脱 WinNAT/ICS**。附带：填代理即可让**下游设备流量走主机的 SOCKS5/HTTP 代理或 VPN**。
-
-GUI 高级里勾"TUN 网关"，或 CLI：
+GUI 高级里"TUN 网关"（默认开），或 CLI：
 ```bash
-sudo ./pharosportal -iface eth1 -uplink eth0 -tun                                  # direct(经主机)
-sudo ./pharosportal -iface eth1 -uplink eth0 -tun -proxy socks5://127.0.0.1:1080   # 走主机代理
+sudo ./pharosportal -iface eth1 -uplink eth0                                # direct(经主机)
+sudo ./pharosportal -iface eth1 -uplink eth0 -proxy socks5://127.0.0.1:1080 # 走主机代理
+sudo ./pharosportal -iface eth1 -tun=false                                  # 仅 DHCP(不上网)
 ```
-- Linux：干净的策略路由，只导设备网段进 TUN，主机流量不受影响。
-- Windows：整机 TUN（默认路由走 TUN，引擎出站绑定上行网卡防环回），类似 Clash TUN；需把 **wintun.dll** 放到 exe 同目录（[下载](https://www.wireguard.com/xplatform/#wintun)）。
-- 状态：tun2socks 转发引擎已验证；下游端到端链路仍需真机测试，欢迎反馈。
+- **Linux**：干净的策略路由，只导设备网段进 TUN，主机流量不受影响。
+- **Windows**：整机 TUN（默认路由走 TUN，引擎出站绑定上行网卡防环回），类似 Clash TUN。**wintun.dll 已内嵌**，启动自动释放到 exe 同目录，无需手放。
+- 防火墙可能拦 UDP 67/68，放行本程序。状态：引擎+路由已在 Linux 验证；接真机的端到端仍在测。
 
 ## 许可
 MIT。

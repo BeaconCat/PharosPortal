@@ -81,7 +81,6 @@
         <div><label data-i18n="rangeEnd"></label><input id="rangeEnd"></div>
         <div><label data-i18n="lease"></label><input id="leaseMin" type="number"></div>
       </div>
-      <label class="chk"><input type="checkbox" id="nat"> <span data-i18n="natOpt"></span></label>
       <label class="chk"><input type="checkbox" id="tun"> <span data-i18n="tunOpt"></span></label>
       <label class="chk"><input type="checkbox" id="setIP"> <span data-i18n="setIPOpt"></span></label>
       <label style="margin-top:10px" data-i18n="proxyLabel"></label>
@@ -153,7 +152,7 @@ function applyLang(){
 }
 $('langBtn').onclick = ()=>{ lang = lang==='en'?'zh':'en'; LS.set('lang',lang); applyLang(); };
 
-const CFG_FIELDS = ['iface','uplink','serverIP','mask','dns','rangeStart','rangeEnd','leaseMin','nat','tun','setIP','proxy'];
+const CFG_FIELDS = ['iface','uplink','serverIP','mask','dns','rangeStart','rangeEnd','leaseMin','tun','setIP','proxy'];
 function readForm(){
   const c={}; CFG_FIELDS.forEach(id=>{const e=$(id); c[id]= e.type==='checkbox'?e.checked : e.value;}); return c;
 }
@@ -170,7 +169,7 @@ async function loadIfaces(){
   // defaults then restore saved
   $('serverIP').value=d.serverIP; $('mask').value=d.mask; $('dns').value=d.dns;
   $('rangeStart').value=d.rangeStart; $('rangeEnd').value=d.rangeEnd; $('leaseMin').value=d.leaseMin;
-  $('nat').checked=!!d.nat; $('setIP').checked=!!d.setIP; $('tun').checked=!!d.tun; $('proxy').value=d.proxy||'';
+  $('setIP').checked=!!d.setIP; $('tun').checked=!!d.tun; $('proxy').value=d.proxy||'';
   if(saved){ CFG_FIELDS.forEach(id=>{ if(saved[id]!==undefined){ const e=$(id);
      if(e.type==='checkbox') e.checked=!!saved[id]; else e.value=saved[id]; }}); }
   else { const up = ifaces.find(i=>i.up && i.addrs && i.addrs.some(a=>!a.startsWith('fe80')&&!a.startsWith('169.254'))); if(up) $('uplink').value=up.name; }
@@ -187,7 +186,7 @@ $('go').onclick = async ()=>{
   const f = readForm();
   const cfg = { iface:f.iface, uplink:f.uplink, serverIP:f.serverIP, mask:f.mask, dns:f.dns,
     rangeStart:f.rangeStart, rangeEnd:f.rangeEnd, leaseMin:parseInt(f.leaseMin||'720'),
-    nat:!!f.nat, setIP:!!f.setIP, tun:!!f.tun, proxy:f.proxy };
+    setIP:!!f.setIP, tun:!!f.tun, proxy:f.proxy };
   const r = await (await fetch('/api/start',{method:'POST',body:JSON.stringify(cfg)})).json();
   if(!r.ok) alert(t('startFail')+(r.err||'?'));
 };
