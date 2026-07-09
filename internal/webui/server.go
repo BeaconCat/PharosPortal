@@ -50,6 +50,18 @@ func Run(mgr *portal.Manager, port int) error {
 		mgr.Stop()
 		writeJSON(w, map[string]any{"ok": true})
 	})
+	mux.HandleFunc("/api/proxytest", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Proxy string `json:"proxy"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		ms, err := portal.TestProxy(body.Proxy)
+		if err != nil {
+			writeJSON(w, map[string]any{"ok": false, "err": err.Error()})
+			return
+		}
+		writeJSON(w, map[string]any{"ok": true, "ms": ms})
+	})
 
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
 	ln, err := net.Listen("tcp", addr)

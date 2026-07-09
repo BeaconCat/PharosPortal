@@ -22,9 +22,10 @@ type Config struct {
 	RangeEnd   string `json:"rangeEnd"`
 	DNS        string `json:"dns"`
 	LeaseMin   int    `json:"leaseMin"`
-	SetIP      bool   `json:"setIP"`
-	TUN        bool   `json:"tun"`   // TUN 网关: 给设备上网 (用户态 NAT)
-	Proxy      string `json:"proxy"` // TUN 出站: 空=direct(经主机); 或 socks5://host:port / http://host:port
+	SetIP      bool     `json:"setIP"`
+	TUN        bool     `json:"tun"`   // TUN 网关: 给设备上网 (用户态 NAT)
+	Proxy      string   `json:"proxy"` // TUN 出站: 空=direct(经主机); 或 socks5://host:port / http://host:port
+	Allow      []string `json:"allow"` // MAC 白名单 (非空则只服务名单内设备)
 }
 
 // DefaultConfig 返回默认参数。
@@ -37,10 +38,11 @@ func DefaultConfig() Config {
 }
 
 type leaseInfo struct {
-	MAC  string    `json:"mac"`
-	IP   string    `json:"ip"`
-	Seen time.Time `json:"seen"`
-	Ack  bool      `json:"ack"`
+	MAC    string    `json:"mac"`
+	IP     string    `json:"ip"`
+	Seen   time.Time `json:"seen"`
+	Ack    bool      `json:"ack"`
+	logged bool      `json:"-"`
 }
 
 // Manager 管理一次网卡接管的生命周期 (DHCP / NAT / ICS)。
@@ -56,6 +58,7 @@ type Manager struct {
 	mask     net.IP
 	mode     string // "dhcp" | "tun"
 	gw       *tungw.Gateway
+	allow    map[string]bool // 规范化 MAC 白名单
 	logs     []string
 }
 
@@ -98,7 +101,16 @@ func (m *Manager) Start(cfg Config) error {
 	m.mu.Lock()
 	m.cfg, m.serverIP, m.mask, m.lo, m.hi = cfg, serverIP, mask, lo, hi
 	m.leases, m.used = map[string]*leaseInfo{}, map[string]bool{}
+	m.allow = map[string]bool{}
+	for _, a := range cfg.Allow {
+		if a = normalizeMAC(a); len(a) == 17 {
+			m.allow[a] = true
+		}
+	}
 	m.mode = "dhcp"
+	if len(m.allow) > 0 {
+		m.logf("MAC allowlist active: %d device(s)", len(m.allow))
+	}
 	m.mu.Unlock()
 
 	// TUN 网关模式: 保留内建 DHCP (设备拿 192.168.88.x), 另起 TUN 用户态 NAT 让设备上网。
@@ -193,18 +205,24 @@ func (m *Manager) Stop() {
 type Status struct {
 	Running bool        `json:"running"`
 	Admin   bool        `json:"admin"`
+	Mode    string      `json:"mode"`
 	Cfg     Config      `json:"cfg"`
 	Leases  []leaseInfo `json:"leases"`
+	Traffic Traffic     `json:"traffic"`
 	Logs    []string    `json:"logs"`
 }
 
 func (m *Manager) Status() Status {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	st := Status{Running: m.running, Admin: IsAdmin(), Cfg: m.cfg, Logs: append([]string{}, m.logs...)}
+	st := Status{Running: m.running, Admin: IsAdmin(), Mode: m.mode, Cfg: m.cfg, Logs: append([]string{}, m.logs...)}
 	for _, l := range m.leases {
 		st.Leases = append(st.Leases, *l)
 	}
+	tun := m.mode == "tun" && m.running
+	m.mu.Unlock()
 	sort.Slice(st.Leases, func(i, j int) bool { return st.Leases[i].IP < st.Leases[j].IP })
+	if tun {
+		st.Traffic = m.trafficStats()
+	}
 	return st
 }

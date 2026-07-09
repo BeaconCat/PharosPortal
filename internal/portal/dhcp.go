@@ -87,7 +87,16 @@ func parseDHCP(b []byte) (*dhcpReq, error) {
 }
 
 func (m *Manager) handle(req *dhcpReq) []byte {
-	yi := m.alloc(req.chaddr.String())
+	mac := req.chaddr.String()
+	// MAC 白名单: 非空时, 只服务名单内设备 (同段其它设备一律不理)。
+	m.mu.Lock()
+	if len(m.allow) > 0 && !m.allow[normalizeMAC(mac)] {
+		m.mu.Unlock()
+		return nil
+	}
+	m.mu.Unlock()
+
+	yi := m.alloc(mac)
 	if yi == nil {
 		m.logf("[!] address pool exhausted for %s", req.chaddr)
 		return nil
@@ -96,13 +105,32 @@ func (m *Manager) handle(req *dhcpReq) []byte {
 	if req.mtype == 3 {
 		respType = 5 // ACK
 		m.mu.Lock()
-		if l := m.leases[req.chaddr.String()]; l != nil {
+		if l := m.leases[mac]; l != nil {
+			// 只在首次 ACK 或 IP 变化时打日志, 避免续租刷屏
+			if !l.logged || l.IP != yi.String() {
+				m.logf(">> device  MAC=%s  IP=%s", mac, yi)
+				l.logged = true
+			}
 			l.Ack = true
 		}
 		m.mu.Unlock()
-		m.logf(">> device  MAC=%s  IP=%s  (ACK)", req.chaddr, yi)
 	}
 	return m.buildReply(req, respType, yi)
+}
+
+func normalizeMAC(s string) string {
+	out := make([]rune, 0, len(s))
+	for _, r := range s {
+		switch {
+		case r == '-':
+			out = append(out, ':')
+		case r >= 'A' && r <= 'F':
+			out = append(out, r+32)
+		default:
+			out = append(out, r)
+		}
+	}
+	return string(out)
 }
 
 func (m *Manager) buildReply(req *dhcpReq, mtype byte, yi net.IP) []byte {

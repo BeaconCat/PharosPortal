@@ -84,15 +84,24 @@
       <label class="chk"><input type="checkbox" id="tun"> <span data-i18n="tunOpt"></span></label>
       <label class="chk"><input type="checkbox" id="setIP"> <span data-i18n="setIPOpt"></span></label>
       <label style="margin-top:10px" data-i18n="proxyLabel"></label>
-      <input id="proxy" placeholder="socks5://127.0.0.1:1080">
+      <div style="display:flex;gap:8px;align-items:center">
+        <input id="proxy" placeholder="socks5://127.0.0.1:1080" style="flex:1">
+        <button id="proxyTest" style="white-space:nowrap;border:1px solid var(--line);background:var(--card2);color:var(--txt);border-radius:9px;padding:10px 12px;cursor:pointer" data-i18n="testBtn"></button>
+      </div>
+      <div id="proxyResult" style="font-size:12px;margin-top:5px;min-height:15px;color:var(--dim)"></div>
+      <label style="margin-top:10px" data-i18n="allowLabel"></label>
+      <input id="allow" placeholder="a4:2a:26:6f:93:2e, bc:89:f8:...">
     </details>
 
     <button class="btn" id="go"></button>
   </div>
 
   <div class="card">
-    <div class="sec" data-i18n="devices"></div>
-    <table><thead><tr><th>MAC</th><th>IP</th><th data-i18n="statusCol"></th></tr></thead>
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <div class="sec" data-i18n="devices"></div>
+      <div id="trafTotal" style="font-size:12px;color:var(--dim)"></div>
+    </div>
+    <table><thead><tr><th>MAC</th><th>IP</th><th data-i18n="statusCol"></th><th style="text-align:right">↑</th><th style="text-align:right">↓</th></tr></thead>
       <tbody id="leases"></tbody>
     </table>
   </div>
@@ -115,6 +124,8 @@ const I18N = {
     gateway:"Gateway IP", mask:"Subnet mask", rangeStart:"Pool start", rangeEnd:"Pool end", lease:"Lease (min)",
     natOpt:"Enable NAT (let device reach internet)", setIPOpt:"Auto-configure NIC IP",
     tunOpt:"TUN gateway (userspace NAT, bypass WinNAT/ICS)", proxyLabel:"Downstream proxy for TUN (optional, e.g. socks5://ip:port)",
+    testBtn:"Test", allowLabel:"MAC allowlist (optional, only serve these; comma/space separated)",
+    testing:"testing...", proxyOkMsg:"OK", proxyFailMsg:"failed", total:"total",
     start:"Start", stop:"Stop",
     devices:"Connected devices", statusCol:"Status", assigned:"assigned", requesting:"requesting",
     empty:"No device yet. Power on the device to see it here.",
@@ -130,6 +141,8 @@ const I18N = {
     gateway:"网关 IP", mask:"子网掩码", rangeStart:"地址池起", rangeEnd:"地址池止", lease:"租约(分钟)",
     natOpt:"启用 NAT (让设备能上网)", setIPOpt:"自动配置网卡 IP",
     tunOpt:"TUN 网关 (用户态 NAT, 绕开 WinNAT/ICS)", proxyLabel:"TUN 下游代理 (可选, 如 socks5://ip:port)",
+    testBtn:"测试", allowLabel:"MAC 白名单 (可选, 只服务这些设备; 逗号/空格分隔)",
+    testing:"测试中...", proxyOkMsg:"通", proxyFailMsg:"失败", total:"合计",
     start:"启动", stop:"停止",
     devices:"已接入的设备", statusCol:"状态", assigned:"已分配", requesting:"请求中",
     empty:"尚无设备, 上电后自动出现。",
@@ -152,7 +165,8 @@ function applyLang(){
 }
 $('langBtn').onclick = ()=>{ lang = lang==='en'?'zh':'en'; LS.set('lang',lang); applyLang(); };
 
-const CFG_FIELDS = ['iface','uplink','serverIP','mask','dns','rangeStart','rangeEnd','leaseMin','tun','setIP','proxy'];
+const CFG_FIELDS = ['iface','uplink','serverIP','mask','dns','rangeStart','rangeEnd','leaseMin','tun','setIP','proxy','allow'];
+const fmtBytes = n => { n=n||0; const u=['B','K','M','G','T']; let i=0; while(n>=1024&&i<4){n/=1024;i++} return n.toFixed(i?1:0)+u[i]; };
 function readForm(){
   const c={}; CFG_FIELDS.forEach(id=>{const e=$(id); c[id]= e.type==='checkbox'?e.checked : e.value;}); return c;
 }
@@ -169,7 +183,7 @@ async function loadIfaces(){
   // defaults then restore saved
   $('serverIP').value=d.serverIP; $('mask').value=d.mask; $('dns').value=d.dns;
   $('rangeStart').value=d.rangeStart; $('rangeEnd').value=d.rangeEnd; $('leaseMin').value=d.leaseMin;
-  $('setIP').checked=!!d.setIP; $('tun').checked=!!d.tun; $('proxy').value=d.proxy||'';
+  $('setIP').checked=!!d.setIP; $('tun').checked=!!d.tun; $('proxy').value=d.proxy||''; $('allow').value='';
   if(saved){ CFG_FIELDS.forEach(id=>{ if(saved[id]!==undefined){ const e=$(id);
      if(e.type==='checkbox') e.checked=!!saved[id]; else e.value=saved[id]; }}); }
   else { const up = ifaces.find(i=>i.up && i.addrs && i.addrs.some(a=>!a.startsWith('fe80')&&!a.startsWith('169.254'))); if(up) $('uplink').value=up.name; }
@@ -186,18 +200,32 @@ $('go').onclick = async ()=>{
   const f = readForm();
   const cfg = { iface:f.iface, uplink:f.uplink, serverIP:f.serverIP, mask:f.mask, dns:f.dns,
     rangeStart:f.rangeStart, rangeEnd:f.rangeEnd, leaseMin:parseInt(f.leaseMin||'720'),
-    setIP:!!f.setIP, tun:!!f.tun, proxy:f.proxy };
+    setIP:!!f.setIP, tun:!!f.tun, proxy:f.proxy,
+    allow:(f.allow||'').split(/[\s,]+/).filter(Boolean) };
   const r = await (await fetch('/api/start',{method:'POST',body:JSON.stringify(cfg)})).json();
   if(!r.ok) alert(t('startFail')+(r.err||'?'));
 };
 
-let lastStatus = {leases:[],logs:[]};
+$('proxyTest').onclick = async ()=>{
+  const r=$('proxyResult'); r.style.color='var(--dim)'; r.textContent=t('testing');
+  try{
+    const resp=await (await fetch('/api/proxytest',{method:'POST',body:JSON.stringify({proxy:$('proxy').value})})).json();
+    if(resp.ok){ r.style.color='var(--ok)'; r.textContent=t('proxyOkMsg')+'  '+resp.ms+' ms'; }
+    else { r.style.color='var(--err)'; r.textContent=t('proxyFailMsg')+': '+(resp.err||'?'); }
+  }catch(e){ r.style.color='var(--err)'; r.textContent=String(e); }
+};
+
+let lastStatus = {leases:[],logs:[],traffic:{}};
 function render(){
-  const ls = lastStatus.leases||[];
-  $('leases').innerHTML = ls.length ? ls.map(l=>
-    `<tr><td>${l.mac}</td><td class="ip">${l.ip}</td>
-     <td><span class="tag ${l.ack?'':'wait'}">${l.ack?t('assigned'):t('requesting')}</span></td></tr>`).join('')
-    : `<tr><td colspan="3" class="empty">${t('empty')}</td></tr>`;
+  const ls = lastStatus.leases||[]; const tr = lastStatus.traffic||{};
+  const byMac={}; (tr.devices||[]).forEach(d=>byMac[d.mac]=d);
+  $('leases').innerHTML = ls.length ? ls.map(l=>{ const d=byMac[l.mac]||{};
+    return `<tr><td>${l.mac}</td><td class="ip">${l.ip}</td>
+     <td><span class="tag ${l.ack?'':'wait'}">${l.ack?t('assigned'):t('requesting')}</span></td>
+     <td style="text-align:right;color:var(--dim)">${d.up?fmtBytes(d.up):'-'}</td>
+     <td style="text-align:right;color:var(--dim)">${d.down?fmtBytes(d.down):'-'}</td></tr>`;}).join('')
+    : `<tr><td colspan="5" class="empty">${t('empty')}</td></tr>`;
+  $('trafTotal').textContent = (tr.totalUp||tr.totalDown) ? `${t('total')}  ↑${fmtBytes(tr.totalUp)}  ↓${fmtBytes(tr.totalDown)}` : '';
   const log=$('log'); const atBottom = log.scrollTop+log.clientHeight >= log.scrollHeight-10;
   log.textContent = (lastStatus.logs||[]).join('\n'); if(atBottom) log.scrollTop=log.scrollHeight;
 }
