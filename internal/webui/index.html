@@ -1,0 +1,216 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PharosPortal</title>
+<style>
+  :root{
+    --bg:#0f1420; --card:#171e2e; --card2:#1e2740; --line:#2a3450;
+    --txt:#e6ebf5; --dim:#8a97b3; --accent:#3b82f6; --ok:#22c55e; --warn:#f59e0b; --err:#ef4444;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);
+    font:14px/1.5 -apple-system,"Segoe UI",Roboto,"Microsoft YaHei",sans-serif}
+  .wrap{max-width:760px;margin:0 auto;padding:26px 20px 48px}
+  h1{font-size:20px;font-weight:650;margin:0;letter-spacing:.3px}
+  .sub{color:var(--dim);font-size:12px;margin-top:2px}
+  .top{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;gap:12px}
+  .rt{display:flex;align-items:center;gap:10px}
+  .pill{display:inline-flex;align-items:center;gap:7px;font-size:12px;padding:5px 12px;border-radius:999px;background:var(--card2);color:var(--dim)}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--dim)}
+  .dot.on{background:var(--ok);box-shadow:0 0 8px var(--ok)}
+  .lang{cursor:pointer;font-size:12px;color:var(--dim);background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:5px 10px}
+  .lang:hover{color:var(--txt)}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:16px}
+  label{display:block;font-size:12px;color:var(--dim);margin:0 0 6px}
+  select,input{width:100%;background:var(--card2);border:1px solid var(--line);color:var(--txt);border-radius:9px;padding:10px 11px;font-size:14px;outline:none}
+  select:focus,input:focus{border-color:var(--accent)}
+  .ifinfo{font-size:11px;color:var(--dim);margin-top:6px;min-height:15px}
+  details{margin-top:4px}
+  summary{cursor:pointer;color:var(--dim);font-size:12px;user-select:none;margin:6px 0}
+  summary:hover{color:var(--txt)}
+  .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:10px}
+  .chk{display:flex;align-items:center;gap:8px;color:var(--txt);font-size:13px;margin-top:12px}
+  .chk input{width:auto}
+  .btn{width:100%;border:0;border-radius:11px;padding:13px;font-size:15px;font-weight:600;cursor:pointer;color:#fff;background:var(--accent);margin-top:14px}
+  .btn:hover{filter:brightness(1.08)}
+  .btn.stop{background:var(--err)}
+  .banner{background:rgba(245,158,11,.12);border:1px solid var(--warn);color:#fcd7a1;padding:10px 13px;border-radius:10px;font-size:13px;margin-bottom:16px;display:none}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:9px 8px;border-bottom:1px solid var(--line)}
+  th{color:var(--dim);font-weight:500;font-size:12px}
+  td.ip{font-family:ui-monospace,Consolas,monospace;color:#7dd3fc}
+  .tag{font-size:11px;padding:2px 8px;border-radius:999px;background:rgba(34,197,94,.15);color:var(--ok)}
+  .tag.wait{background:rgba(245,158,11,.15);color:var(--warn)}
+  .empty{color:var(--dim);text-align:center;padding:18px;font-size:13px}
+  .log{background:#0b0f1a;border:1px solid var(--line);border-radius:10px;padding:10px 12px;height:150px;overflow:auto;font-family:ui-monospace,Consolas,monospace;font-size:12px;color:#a9b6d3;white-space:pre-wrap}
+  .sec{font-size:12px;color:var(--dim);text-transform:uppercase;letter-spacing:.8px;margin:0 0 10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <div>
+      <h1>PharosPortal</h1>
+      <div class="sub" data-i18n="subtitle"></div>
+    </div>
+    <div class="rt">
+      <div class="pill"><span class="dot" id="dot"></span><span id="state"></span></div>
+      <div class="lang" id="langBtn"></div>
+    </div>
+  </div>
+
+  <div class="banner" id="adminWarn" data-i18n="adminWarn"></div>
+
+  <div class="card">
+    <label><span data-i18n="ifaceLabel"></span> <span style="color:var(--accent)">*</span></label>
+    <select id="iface"></select>
+    <div class="ifinfo" id="ifaceInfo"></div>
+
+    <label style="margin-top:14px" data-i18n="uplinkLabel"></label>
+    <select id="uplink"></select>
+
+    <details>
+      <summary data-i18n="advanced"></summary>
+      <div class="grid3">
+        <div><label data-i18n="gateway"></label><input id="serverIP"></div>
+        <div><label data-i18n="mask"></label><input id="mask"></div>
+        <div><label>DNS</label><input id="dns"></div>
+        <div><label data-i18n="rangeStart"></label><input id="rangeStart"></div>
+        <div><label data-i18n="rangeEnd"></label><input id="rangeEnd"></div>
+        <div><label data-i18n="lease"></label><input id="leaseMin" type="number"></div>
+      </div>
+      <label class="chk"><input type="checkbox" id="nat"> <span data-i18n="natOpt"></span></label>
+      <label class="chk"><input type="checkbox" id="setIP"> <span data-i18n="setIPOpt"></span></label>
+    </details>
+
+    <button class="btn" id="go"></button>
+  </div>
+
+  <div class="card">
+    <div class="sec" data-i18n="devices"></div>
+    <table><thead><tr><th>MAC</th><th>IP</th><th data-i18n="statusCol"></th></tr></thead>
+      <tbody id="leases"></tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <div class="sec" data-i18n="logs"></div>
+    <div class="log" id="log"></div>
+  </div>
+</div>
+
+<script>
+const I18N = {
+  en: {
+    subtitle:"Debug network devices directly through a physical NIC",
+    idle:"Idle", running:"Running",
+    adminWarn:"Not running as administrator/root. Start will fail. Please re-open elevated.",
+    ifaceLabel:"NIC facing the device", uplinkLabel:"Uplink NIC (for NAT / internet)",
+    uplinkNone:"(no NAT)", notConnected:"(down)",
+    advanced:"Advanced (defaults are fine)",
+    gateway:"Gateway IP", mask:"Subnet mask", rangeStart:"Pool start", rangeEnd:"Pool end", lease:"Lease (min)",
+    natOpt:"Enable NAT (let device reach internet)", setIPOpt:"Auto-configure NIC IP",
+    start:"Start", stop:"Stop",
+    devices:"Connected devices", statusCol:"Status", assigned:"assigned", requesting:"requesting",
+    empty:"No device yet. Power on the device to see it here.",
+    logs:"Logs", startFail:"Start failed: "
+  },
+  zh: {
+    subtitle:"通过物理网卡直连调试网络设备的小工具",
+    idle:"未运行", running:"运行中",
+    adminWarn:"未以管理员/root 运行, 启动会失败。请以管理员重新打开。",
+    ifaceLabel:"面向设备的网卡", uplinkLabel:"上行网卡 (NAT / 上网)",
+    uplinkNone:"(不 NAT)", notConnected:"(未连接)",
+    advanced:"高级参数 (默认即可)",
+    gateway:"网关 IP", mask:"子网掩码", rangeStart:"地址池起", rangeEnd:"地址池止", lease:"租约(分钟)",
+    natOpt:"启用 NAT (让设备能上网)", setIPOpt:"自动配置网卡 IP",
+    start:"启动", stop:"停止",
+    devices:"已接入的设备", statusCol:"状态", assigned:"已分配", requesting:"请求中",
+    empty:"尚无设备, 上电后自动出现。",
+    logs:"日志", startFail:"启动失败: "
+  }
+};
+const $ = id => document.getElementById(id);
+const LS = { get:(k,d)=>{try{return JSON.parse(localStorage.getItem('pharos.'+k))??d}catch(e){return d}},
+             set:(k,v)=>localStorage.setItem('pharos.'+k, JSON.stringify(v)) };
+let lang = LS.get('lang','en'), running=false, ifaces=[];
+const t = k => (I18N[lang]||I18N.en)[k] || k;
+
+function applyLang(){
+  document.documentElement.lang = lang==='zh'?'zh-CN':'en';
+  document.querySelectorAll('[data-i18n]').forEach(el=>el.textContent = t(el.dataset.i18n));
+  $('langBtn').textContent = lang==='en' ? '中文' : 'EN';
+  $('go').textContent = running ? t('stop') : t('start');
+  $('state').textContent = running ? t('running') : t('idle');
+  render();       // refresh dynamic parts (dropdowns/table) with new lang
+}
+$('langBtn').onclick = ()=>{ lang = lang==='en'?'zh':'en'; LS.set('lang',lang); applyLang(); };
+
+const CFG_FIELDS = ['iface','uplink','serverIP','mask','dns','rangeStart','rangeEnd','leaseMin','nat','setIP'];
+function readForm(){
+  const c={}; CFG_FIELDS.forEach(id=>{const e=$(id); c[id]= e.type==='checkbox'?e.checked : e.value;}); return c;
+}
+function saveForm(){ LS.set('cfg', readForm()); }
+CFG_FIELDS.forEach(id=>{ const e=$(id); if(e) e.addEventListener('change', saveForm); });
+
+async function loadIfaces(){
+  const r = await (await fetch('/api/ifaces')).json();
+  ifaces = r.ifaces||[]; const d = r.defaults||{}; const saved = LS.get('cfg',null);
+  const optI = i => `<option value="${i.name}">${i.name}${i.up?'':'  '+t('notConnected')}</option>`;
+  $('iface').innerHTML = ifaces.map(optI).join('');
+  $('uplink').innerHTML = `<option value="">${t('uplinkNone')}</option>` +
+    ifaces.map(i=>`<option value="${i.name}">${i.name}${i.addrs&&i.addrs.length?'  '+i.addrs[0]:''}</option>`).join('');
+  // defaults then restore saved
+  $('serverIP').value=d.serverIP; $('mask').value=d.mask; $('dns').value=d.dns;
+  $('rangeStart').value=d.rangeStart; $('rangeEnd').value=d.rangeEnd; $('leaseMin').value=d.leaseMin;
+  $('nat').checked=!!d.nat; $('setIP').checked=!!d.setIP;
+  if(saved){ CFG_FIELDS.forEach(id=>{ if(saved[id]!==undefined){ const e=$(id);
+     if(e.type==='checkbox') e.checked=!!saved[id]; else e.value=saved[id]; }}); }
+  else { const up = ifaces.find(i=>i.up && i.addrs && i.addrs.some(a=>!a.startsWith('fe80')&&!a.startsWith('169.254'))); if(up) $('uplink').value=up.name; }
+  showIfaceInfo();
+}
+function showIfaceInfo(){
+  const i = ifaces.find(x=>x.name===$('iface').value);
+  $('ifaceInfo').textContent = i ? `MAC ${i.mac||'-'}  ·  ${i.up?'UP':t('notConnected')}  ·  ${(i.addrs||[]).join(', ')||'-'}` : '';
+}
+$('iface').onchange = ()=>{ showIfaceInfo(); saveForm(); };
+
+$('go').onclick = async ()=>{
+  if(running){ await fetch('/api/stop',{method:'POST'}); return; }
+  const f = readForm();
+  const cfg = { iface:f.iface, uplink:f.uplink, serverIP:f.serverIP, mask:f.mask, dns:f.dns,
+    rangeStart:f.rangeStart, rangeEnd:f.rangeEnd, leaseMin:parseInt(f.leaseMin||'720'),
+    nat:!!f.nat, setIP:!!f.setIP };
+  const r = await (await fetch('/api/start',{method:'POST',body:JSON.stringify(cfg)})).json();
+  if(!r.ok) alert(t('startFail')+(r.err||'?'));
+};
+
+let lastStatus = {leases:[],logs:[]};
+function render(){
+  const ls = lastStatus.leases||[];
+  $('leases').innerHTML = ls.length ? ls.map(l=>
+    `<tr><td>${l.mac}</td><td class="ip">${l.ip}</td>
+     <td><span class="tag ${l.ack?'':'wait'}">${l.ack?t('assigned'):t('requesting')}</span></td></tr>`).join('')
+    : `<tr><td colspan="3" class="empty">${t('empty')}</td></tr>`;
+  const log=$('log'); const atBottom = log.scrollTop+log.clientHeight >= log.scrollHeight-10;
+  log.textContent = (lastStatus.logs||[]).join('\n'); if(atBottom) log.scrollTop=log.scrollHeight;
+}
+async function poll(){
+  try{
+    const s = await (await fetch('/api/status')).json();
+    running=s.running; lastStatus=s;
+    $('adminWarn').style.display = s.admin?'none':'block';
+    $('dot').className='dot'+(running?' on':'');
+    $('state').textContent = running?t('running'):t('idle');
+    $('go').textContent = running?t('stop'):t('start');
+    $('go').className='btn'+(running?' stop':'');
+    CFG_FIELDS.forEach(id=>$(id).disabled=running);
+    render();
+  }catch(e){}
+}
+(async()=>{ applyLang(); await loadIfaces(); applyLang(); poll(); setInterval(poll,1500); })();
+</script>
+</body>
+</html>
