@@ -14,14 +14,14 @@ import (
 
 // Config 一次运行的配置。
 type Config struct {
-	Iface      string `json:"iface"`
-	Uplink     string `json:"uplink"`
-	ServerIP   string `json:"serverIP"`
-	Mask       string `json:"mask"`
-	RangeStart string `json:"rangeStart"`
-	RangeEnd   string `json:"rangeEnd"`
-	DNS        string `json:"dns"`
-	LeaseMin   int    `json:"leaseMin"`
+	Iface      string   `json:"iface"`
+	Uplink     string   `json:"uplink"`
+	ServerIP   string   `json:"serverIP"`
+	Mask       string   `json:"mask"`
+	RangeStart string   `json:"rangeStart"`
+	RangeEnd   string   `json:"rangeEnd"`
+	DNS        string   `json:"dns"`
+	LeaseMin   int      `json:"leaseMin"`
 	SetIP      bool     `json:"setIP"`
 	TUN        bool     `json:"tun"`   // TUN 网关: 给设备上网 (用户态 NAT)
 	Proxy      string   `json:"proxy"` // TUN 出站: 空=direct(经主机); 或 socks5://host:port / http://host:port
@@ -60,10 +60,18 @@ type Manager struct {
 	gw       *tungw.Gateway
 	allow    map[string]bool // 规范化 MAC 白名单
 	logs     []string
+
+	devTotals map[string]*DevTraffic // 持久 per-IP 累计 (连接关了仍保留)
+	connSeen  map[string][2]int64    // conn id -> 上次 {up,down}, 用于算增量
 }
 
 func NewManager() *Manager {
-	return &Manager{leases: map[string]*leaseInfo{}, used: map[string]bool{}}
+	return &Manager{
+		leases:    map[string]*leaseInfo{},
+		used:      map[string]bool{},
+		devTotals: map[string]*DevTraffic{},
+		connSeen:  map[string][2]int64{},
+	}
 }
 
 func (m *Manager) logf(f string, a ...any) {
@@ -101,6 +109,7 @@ func (m *Manager) Start(cfg Config) error {
 	m.mu.Lock()
 	m.cfg, m.serverIP, m.mask, m.lo, m.hi = cfg, serverIP, mask, lo, hi
 	m.leases, m.used = map[string]*leaseInfo{}, map[string]bool{}
+	m.devTotals, m.connSeen = map[string]*DevTraffic{}, map[string][2]int64{}
 	m.allow = map[string]bool{}
 	for _, a := range cfg.Allow {
 		if a = normalizeMAC(a); len(a) == 17 {

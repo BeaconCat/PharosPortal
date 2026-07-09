@@ -40,6 +40,7 @@ func (m *Manager) trafficStats() Traffic {
 		UploadTotal   int64 `json:"uploadTotal"`
 		DownloadTotal int64 `json:"downloadTotal"`
 		Connections   []struct {
+			ID       string `json:"id"`
 			Metadata struct {
 				SourceIP string `json:"sourceIP"`
 			} `json:"metadata"`
@@ -49,30 +50,45 @@ func (m *Manager) trafficStats() Traffic {
 	}
 	_ = json.Unmarshal(b, &s)
 
-	agg := map[string]*DevTraffic{}
-	for _, c := range s.Connections {
-		ip := c.Metadata.SourceIP
-		d := agg[ip]
-		if d == nil {
-			d = &DevTraffic{IP: ip}
-			agg[ip] = d
-		}
-		d.Up += c.Upload
-		d.Down += c.Download
-		d.Conns++
-	}
 	m.mu.Lock()
 	ipMac := map[string]string{}
 	for _, l := range m.leases {
 		ipMac[l.IP] = l.MAC
 	}
+	// 按连接算增量累加进持久 per-IP 总量; 连接关闭后数值仍保留。
+	newSeen := make(map[string][2]int64, len(s.Connections))
+	active := map[string]int{}
+	for _, c := range s.Connections {
+		ip := c.Metadata.SourceIP
+		prev := m.connSeen[c.ID]
+		dUp := c.Upload - prev[0]
+		dDown := c.Download - prev[1]
+		if dUp < 0 {
+			dUp = c.Upload
+		}
+		if dDown < 0 {
+			dDown = c.Download
+		}
+		d := m.devTotals[ip]
+		if d == nil {
+			d = &DevTraffic{IP: ip}
+			m.devTotals[ip] = d
+		}
+		d.Up += dUp
+		d.Down += dDown
+		newSeen[c.ID] = [2]int64{c.Upload, c.Download}
+		active[ip]++
+	}
+	m.connSeen = newSeen
+	t := Traffic{TotalUp: s.UploadTotal, TotalDown: s.DownloadTotal}
+	for ip, d := range m.devTotals {
+		dc := *d
+		dc.MAC = ipMac[ip]
+		dc.Conns = active[ip]
+		t.Devices = append(t.Devices, dc)
+	}
 	m.mu.Unlock()
 
-	t := Traffic{TotalUp: s.UploadTotal, TotalDown: s.DownloadTotal}
-	for ip, d := range agg {
-		d.MAC = ipMac[ip]
-		t.Devices = append(t.Devices, *d)
-	}
 	sort.Slice(t.Devices, func(i, j int) bool { return t.Devices[i].IP < t.Devices[j].IP })
 	return t
 }

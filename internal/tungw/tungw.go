@@ -38,17 +38,23 @@ func (g *Gateway) Start(o Options) error {
 		proxy = "direct://"
 	}
 	key := &engine.Key{
-		Device:    "tun://" + o.TunName,
-		Proxy:     proxy,
-		Interface: o.Uplink, // 出站绑定上行网卡 -> 引擎自身流量不再被 tun 默认路由抓走
-		LogLevel:  "warn",
+		Device:     "tun://" + o.TunName,
+		Proxy:      proxy,
+		LogLevel:   "warn",
 		UDPTimeout: 0,
+	}
+	// 仅 direct 模式绑定上行网卡 (Windows 整机 tun 防环回; Linux 策略路由下无害)。
+	// 有代理时【不能】绑网卡 —— 会破坏对代理服务器的拨号 (尤其 127.0.0.1 本地代理)。
+	via := "proxy"
+	if o.Proxy == "" {
+		key.Interface = o.Uplink
+		via = orDirect(o.Uplink)
 	}
 	engine.Insert(key)
 	engine.Start()
 	g.opts = o
 	g.started = true
-	o.Log("TUN engine up (%s), outbound=%s via %s", o.TunName, proxy, orDirect(o.Uplink))
+	o.Log("TUN engine up (%s), outbound=%s via %s", o.TunName, proxy, via)
 
 	if err := g.route(true); err != nil {
 		_ = g.Stop()
