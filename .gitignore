@@ -1,5 +1,6 @@
 /dist/
+/pharosportal
+/pharosportal.exe
+/pharosportal-*
 *.exe
 *.exe~
-pharosportal
-pharosportal-*
