@@ -82,7 +82,10 @@
         <div><label data-i18n="lease"></label><input id="leaseMin" type="number"></div>
       </div>
       <label class="chk"><input type="checkbox" id="nat"> <span data-i18n="natOpt"></span></label>
+      <label class="chk"><input type="checkbox" id="tun"> <span data-i18n="tunOpt"></span></label>
       <label class="chk"><input type="checkbox" id="setIP"> <span data-i18n="setIPOpt"></span></label>
+      <label style="margin-top:10px" data-i18n="proxyLabel"></label>
+      <input id="proxy" placeholder="socks5://127.0.0.1:1080">
     </details>
 
     <button class="btn" id="go"></button>
@@ -112,6 +115,7 @@ const I18N = {
     advanced:"Advanced (defaults are fine)",
     gateway:"Gateway IP", mask:"Subnet mask", rangeStart:"Pool start", rangeEnd:"Pool end", lease:"Lease (min)",
     natOpt:"Enable NAT (let device reach internet)", setIPOpt:"Auto-configure NIC IP",
+    tunOpt:"TUN gateway (userspace NAT, bypass WinNAT/ICS)", proxyLabel:"Downstream proxy for TUN (optional, e.g. socks5://ip:port)",
     start:"Start", stop:"Stop",
     devices:"Connected devices", statusCol:"Status", assigned:"assigned", requesting:"requesting",
     empty:"No device yet. Power on the device to see it here.",
@@ -126,6 +130,7 @@ const I18N = {
     advanced:"高级参数 (默认即可)",
     gateway:"网关 IP", mask:"子网掩码", rangeStart:"地址池起", rangeEnd:"地址池止", lease:"租约(分钟)",
     natOpt:"启用 NAT (让设备能上网)", setIPOpt:"自动配置网卡 IP",
+    tunOpt:"TUN 网关 (用户态 NAT, 绕开 WinNAT/ICS)", proxyLabel:"TUN 下游代理 (可选, 如 socks5://ip:port)",
     start:"启动", stop:"停止",
     devices:"已接入的设备", statusCol:"状态", assigned:"已分配", requesting:"请求中",
     empty:"尚无设备, 上电后自动出现。",
@@ -148,7 +153,7 @@ function applyLang(){
 }
 $('langBtn').onclick = ()=>{ lang = lang==='en'?'zh':'en'; LS.set('lang',lang); applyLang(); };
 
-const CFG_FIELDS = ['iface','uplink','serverIP','mask','dns','rangeStart','rangeEnd','leaseMin','nat','setIP'];
+const CFG_FIELDS = ['iface','uplink','serverIP','mask','dns','rangeStart','rangeEnd','leaseMin','nat','tun','setIP','proxy'];
 function readForm(){
   const c={}; CFG_FIELDS.forEach(id=>{const e=$(id); c[id]= e.type==='checkbox'?e.checked : e.value;}); return c;
 }
@@ -165,7 +170,7 @@ async function loadIfaces(){
   // defaults then restore saved
   $('serverIP').value=d.serverIP; $('mask').value=d.mask; $('dns').value=d.dns;
   $('rangeStart').value=d.rangeStart; $('rangeEnd').value=d.rangeEnd; $('leaseMin').value=d.leaseMin;
-  $('nat').checked=!!d.nat; $('setIP').checked=!!d.setIP;
+  $('nat').checked=!!d.nat; $('setIP').checked=!!d.setIP; $('tun').checked=!!d.tun; $('proxy').value=d.proxy||'';
   if(saved){ CFG_FIELDS.forEach(id=>{ if(saved[id]!==undefined){ const e=$(id);
      if(e.type==='checkbox') e.checked=!!saved[id]; else e.value=saved[id]; }}); }
   else { const up = ifaces.find(i=>i.up && i.addrs && i.addrs.some(a=>!a.startsWith('fe80')&&!a.startsWith('169.254'))); if(up) $('uplink').value=up.name; }
@@ -182,7 +187,7 @@ $('go').onclick = async ()=>{
   const f = readForm();
   const cfg = { iface:f.iface, uplink:f.uplink, serverIP:f.serverIP, mask:f.mask, dns:f.dns,
     rangeStart:f.rangeStart, rangeEnd:f.rangeEnd, leaseMin:parseInt(f.leaseMin||'720'),
-    nat:!!f.nat, setIP:!!f.setIP };
+    nat:!!f.nat, setIP:!!f.setIP, tun:!!f.tun, proxy:f.proxy };
   const r = await (await fetch('/api/start',{method:'POST',body:JSON.stringify(cfg)})).json();
   if(!r.ok) alert(t('startFail')+(r.err||'?'));
 };

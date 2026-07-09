@@ -57,8 +57,20 @@ The device sits on a private subnet reachable from the host. To reach it from yo
 ## Safety
 The built-in DHCP is restricted to the chosen NIC (Linux `SO_BINDTODEVICE`; Windows `IP_UNICAST_IF` so replies only egress that NIC). It will not disturb DHCP on your other networks.
 
-## Roadmap
-- **TUN userspace gateway** (like modern proxy apps): reliable cross-platform NAT without WinNAT/ICS, and the ability to route the downstream device's traffic through the host's proxy/VPN.
+## TUN gateway mode (experimental)
+A userspace NAT built on a TUN device + gVisor netstack (via tun2socks), like modern proxy apps.
+It keeps the built-in DHCP (device still gets 192.168.88.x + shows in the lease table) and adds
+reliable cross-platform NAT **without** WinNAT/ICS. Bonus: point it at a proxy to route the
+downstream device's traffic through the host's SOCKS5/HTTP proxy or VPN.
+
+Enable it in the GUI (advanced: "TUN gateway") or CLI:
+```bash
+sudo ./pharosportal -iface eth1 -uplink eth0 -tun                       # direct (via host)
+sudo ./pharosportal -iface eth1 -uplink eth0 -tun -proxy socks5://127.0.0.1:1080  # via host proxy
+```
+- Linux: clean policy routing — only the device subnet goes through the TUN; host traffic untouched.
+- Windows: whole-host TUN (default route via the TUN, engine binds outbound to the uplink to avoid loops), like Clash TUN mode; needs **wintun.dll** next to the exe ([download](https://www.wireguard.com/xplatform/#wintun)).
+- Status: the tun2socks forwarding engine is validated; the end-to-end downstream path still needs testing against real hardware. Report issues.
 
 ## Project layout
 ```
@@ -101,8 +113,17 @@ go build -o pharosportal ./cmd/pharosportal
 - **Windows NAT = ICS（自动）**：`New-NetNat` 常报 `0x80041013 提供程序加载失败`，故启用 NAT 时改用系统 ICS（HNetCfg COM）。ICS 由系统托管：把设备网卡设为 **192.168.137.1**、自带 DHCP、做 NAT——此模式下设备拿到 **192.168.137.x**（不是内建 DHCP 的 192.168.88.x），工具经 ARP 发现并显示。想用内建 DHCP（88.x + 租约表）就**不勾 NAT**（设备仍可被本机访问，只是它自己不上网）。
 - 防火墙可能拦 UDP 67/68，放行本程序。
 
-## 路线图
-- **TUN 用户态网关**（借鉴现代代理软件）：跨平台可靠 NAT，摆脱 WinNAT/ICS；并可让下游设备的流量走主机的代理/VPN。
+## TUN 网关模式（实验）
+基于 TUN + gVisor 用户态协议栈（tun2socks），像现代代理软件那样做 NAT。**保留内建 DHCP**（设备照拿 192.168.88.x、进租约表），并提供跨平台可靠 NAT，**摆脱 WinNAT/ICS**。附带：填代理即可让**下游设备流量走主机的 SOCKS5/HTTP 代理或 VPN**。
+
+GUI 高级里勾"TUN 网关"，或 CLI：
+```bash
+sudo ./pharosportal -iface eth1 -uplink eth0 -tun                                  # direct(经主机)
+sudo ./pharosportal -iface eth1 -uplink eth0 -tun -proxy socks5://127.0.0.1:1080   # 走主机代理
+```
+- Linux：干净的策略路由，只导设备网段进 TUN，主机流量不受影响。
+- Windows：整机 TUN（默认路由走 TUN，引擎出站绑定上行网卡防环回），类似 Clash TUN；需把 **wintun.dll** 放到 exe 同目录（[下载](https://www.wireguard.com/xplatform/#wintun)）。
+- 状态：tun2socks 转发引擎已验证；下游端到端链路仍需真机测试，欢迎反馈。
 
 ## 许可
 MIT。

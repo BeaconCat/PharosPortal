@@ -31,6 +31,8 @@ func main() {
 		fLease  = flag.Int("lease-min", 720, "lease minutes")
 		fNoNAT  = flag.Bool("no-nat", false, "do not configure NAT")
 		fNoIP   = flag.Bool("no-setip", false, "do not auto-configure NIC IP")
+		fTUN    = flag.Bool("tun", false, "TUN gateway mode (userspace NAT, bypass WinNAT/ICS)")
+		fProxy  = flag.String("proxy", "", "TUN downstream proxy, e.g. socks5://127.0.0.1:1080 (empty=direct)")
 		fPort   = flag.Int("gui-port", 8765, "GUI local port")
 	)
 	flag.Parse()
@@ -52,7 +54,7 @@ func main() {
 	cfg := portal.Config{
 		Iface: *fIface, Uplink: *fUplink, ServerIP: *fServer, Mask: *fMask,
 		RangeStart: *fStart, RangeEnd: *fEnd, DNS: *fDNS, LeaseMin: *fLease,
-		NAT: !*fNoNAT, SetIP: !*fNoIP,
+		NAT: !*fNoNAT, SetIP: !*fNoIP, TUN: *fTUN, Proxy: *fProxy,
 	}
 	if err := mgr.Start(cfg); err != nil {
 		fmt.Println("[x] start failed:", err)

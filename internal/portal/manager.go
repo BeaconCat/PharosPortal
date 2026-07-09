@@ -9,6 +9,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/BeaconCat/PharosPortal/internal/tungw"
 )
 
 // Config 一次运行的配置。
@@ -23,6 +25,8 @@ type Config struct {
 	LeaseMin   int    `json:"leaseMin"`
 	NAT        bool   `json:"nat"`
 	SetIP      bool   `json:"setIP"`
+	TUN        bool   `json:"tun"`   // TUN 网关模式 (用户态 NAT, 绕开 WinNAT/ICS)
+	Proxy      string `json:"proxy"` // TUN 出站: 空=direct; 或 socks5://host:port / http://host:port
 }
 
 // DefaultConfig 返回默认参数。
@@ -53,7 +57,8 @@ type Manager struct {
 	serverIP net.IP
 	mask     net.IP
 	natOn    bool
-	mode     string // "dhcp" | "ics"
+	mode     string // "dhcp" | "ics" | "tun"
+	gw       *tungw.Gateway
 	logs     []string
 }
 
@@ -98,6 +103,43 @@ func (m *Manager) Start(cfg Config) error {
 	m.leases, m.used = map[string]*leaseInfo{}, map[string]bool{}
 	m.natOn, m.mode = false, "dhcp"
 	m.mu.Unlock()
+
+	// TUN 网关模式: 保留内建 DHCP (设备拿 192.168.88.x), 另起 TUN 用户态 NAT 让设备上网。
+	// 跨平台可靠, 绕开 WinNAT/ICS; Proxy 非空则下游走主机代理。
+	if cfg.TUN && cfg.Uplink != "" {
+		if cfg.SetIP {
+			m.logf("setting %s -> %s/%d", cfg.Iface, serverIP, ones)
+			if err := setStaticIP(cfg.Iface, serverIP, mask, ones); err != nil {
+				return fmt.Errorf("set interface IP failed: %v", err)
+			}
+		}
+		gw := tungw.New()
+		if err := gw.Start(tungw.Options{
+			TunName: "pptun0", TunAddr: "198.18.0.1", TunCIDR: 15,
+			DevSubnet: subnetCIDR(serverIP, ones), Uplink: cfg.Uplink, Proxy: cfg.Proxy,
+			Log: m.logf,
+		}); err != nil {
+			m.logf("[!] TUN gateway failed (device will get IP but no internet): %v", err)
+		} else {
+			m.mu.Lock()
+			m.gw, m.mode = gw, "tun"
+			m.mu.Unlock()
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		m.mu.Lock()
+		m.cancel, m.running = cancel, true
+		m.mu.Unlock()
+		go func() {
+			m.logf("DHCP serving on %s only (ifindex=%d). Waiting for device ...", cfg.Iface, iface.Index)
+			if err := m.serveDHCP(ctx, iface); err != nil && ctx.Err() == nil {
+				m.logf("[x] DHCP error: %v", err)
+			}
+			m.mu.Lock()
+			m.running = false
+			m.mu.Unlock()
+		}()
+		return nil
+	}
 
 	// Windows + NAT: New-NetNat 的 WMI provider 在很多机器上会 0x80041013, 改用系统 ICS。
 	// ICS 自带 DHCP+NAT, 固定 192.168.137.x。
@@ -156,11 +198,20 @@ func (m *Manager) Stop() {
 		m.mu.Unlock()
 		return
 	}
-	cancel, cfg, serverIP, mask, natOn, mode := m.cancel, m.cfg, m.serverIP, m.mask, m.natOn, m.mode
+	cancel, cfg, serverIP, mask, natOn, mode, gw := m.cancel, m.cfg, m.serverIP, m.mask, m.natOn, m.mode, m.gw
 	m.mu.Unlock()
 	m.logf("stopping, cleaning up ...")
 	if cancel != nil {
 		cancel()
+	}
+	if gw != nil {
+		_ = gw.Stop()
+		m.mu.Lock()
+		m.gw = nil
+		m.mu.Unlock()
+	}
+	if mode == "tun" && cfg.SetIP {
+		_ = unsetStaticIP(cfg.Iface)
 	}
 	if mode == "ics" {
 		if err := disableICS(cfg.Uplink, cfg.Iface); err != nil {
